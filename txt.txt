@@ -1,0 +1,229 @@
+import math
+import matplotlib.pyplot as plt
+
+# Get user inputs
+ship_length = float(input("Enter the ship length (in meters): "))
+ship_width = float(input("Enter the ship width (in meters): "))
+ship_draft = float(input("Enter the ship draft (in meters): "))
+block_coefficient = float(input("Enter the block coefficient: "))
+scale_factor =  float(input("Enter the scale factor of the model (between 0 and 1): "))
+ship_speed_knots = float(input("Enter the ship's speed in knots: "))
+current_speed_m_s = float(input("Enter the current speed in m/s: "))
+current_direction_deg = float(input("Enter the current direction in degrees[ degrees is angle between north to current direct]: "))
+wave_frequency =   float(input("Enter the wave frequency (in Hz): "))
+wave_direction_deg = float(input("Enter the wave direction in degrees[Head sea is 0 degrees]: "))
+wave_amplitude =   float(input("Enter the wave amplitude (ζ in meters): "))
+model_resistance =   float(input("Enter the resistance force of the model in the towing tank (in N): "))
+efficiency =  float(input("Enter the efficiency of the motor (between 0 and 1): "))
+fuel_density =  float(input("Enter the fuel density(between 0 and 1): "))
+while True:
+    ship_type = input("Enter the ship type ('container', 'commercial', 'ferry'): ").lower()
+    if ship_type in ['container', 'commercial', 'ferry']:
+        break
+    else:
+        print("Invalid ship type. Please try again.")
+
+
+# Calculate model dimensions
+model_length = ship_length * scale_factor
+model_width = ship_width * scale_factor
+model_draft = ship_draft * scale_factor
+displacement = (block_coefficient * ship_length * ship_width * ship_draft) / 1.025
+
+# Calculate model displacement
+model_displacement = displacement * (scale_factor ** 3)
+
+# Convert ship speed from knots to m/s
+ship_speed_m_s = ship_speed_knots * 0.514444  # 1 knot = 0.514444 m/s
+
+# Convert current direction and wave direction from degrees to radians
+current_direction_rad = math.radians(current_direction_deg)
+wave_direction_rad = math.radians(wave_direction_deg)
+
+# Calculate apparent speed
+apparent_speed = math.sqrt((ship_speed_m_s + current_speed_m_s * math.sin(current_direction_rad))**2 + (current_speed_m_s * math.cos(current_direction_rad))**2)
+
+# Calculate Froude number
+froude_number = apparent_speed / math.sqrt(9.81 * ship_length)
+
+# Calculate model speed
+model_speed = froude_number * math.sqrt(9.81 * model_length)
+
+# Calculate Reynolds number for ship
+kinematic_viscosity = 1.1892e-6  # Kinematic viscosity of water (m^2/s)
+reynolds_number_ship = apparent_speed * ship_length / kinematic_viscosity
+
+# Calculate Reynolds number for model
+reynolds_number_model = model_speed * model_length / kinematic_viscosity
+
+# Calculate wetted area for ship and model
+wetted_area_ship = 2.56 * (displacement * ship_length) ** 0.5
+wetted_area_model = 2.56 * (model_displacement * model_length) ** 0.5
+
+# Calculate form factor for ship and model using Conn and Ferguson relation
+k_ship = 18.7 * (block_coefficient * ship_width / ship_length) ** 2
+k_model = 18.7 * (block_coefficient * model_width / model_length) ** 2
+
+# Calculate frictional resistance coefficient (Cf) using Schoenherr relation
+cf_ship = 0.075 / ((math.log10(reynolds_number_ship) - 2) ** 2)
+cf_model = 0.075 / ((math.log10(reynolds_number_model) - 2) ** 2)
+
+# Calculate additional resistance components
+roughness_allowance = 0.044 * ((150e-6 / wetted_area_ship) ** (1 / 3) - 10 * reynolds_number_ship ** (-1 / 3)) + 0.000125
+air_resistance_coefficient = 0.001 * (ship_width * 10) / wetted_area_ship  # Assuming superstructure area is 10 times the ship width
+
+# Calculate residuary resistance coefficient (CR)
+ct_model = model_resistance / (0.5 * 1025 * model_speed ** 2 * wetted_area_model)
+cr = ct_model - (1 + k_model) * cf_model
+
+# ITTC resistance calculation
+speed_range = [speed for speed in range(0, int(ship_speed_m_s * 1.5), 1)]
+resistance_newtons = []
+for speed in speed_range:
+    density = 1025  # Density of water (kg/m^3)
+    cts = (1 + k_ship) * cf_ship + cr + roughness_allowance + 0.006 + air_resistance_coefficient  # Total resistance coefficient
+    rm = 0.5 * density * speed ** 2 * wetted_area_ship * cts  # Resistance of ship in Newtons
+    resistance_newtons.append(rm)
+
+# Convert resistance from Newtons to Kilonewtons (kN)
+resistance_kn = [r / 1000 for r in resistance_newtons]
+
+# Find the resistance at the exact apparent speed
+apparent_resistance_newtons = 0.5 * 1025 * apparent_speed ** 2 * wetted_area_ship * ((1 + k_ship) * cf_ship + cr + roughness_allowance + 0.006 + air_resistance_coefficient)
+apparent_resistance_kn = apparent_resistance_newtons / 1000
+
+# Calculate wave encounter frequency
+we = wave_frequency - (apparent_speed / 9.81) * math.cos(wave_direction_rad - current_direction_rad)
+
+# Calculate wave resistance using Maruo's relation
+wave_resistance_newtons = 0.5 * 1025 * (ship_width ** 2) * (wave_amplitude ** 2) * (we ** 2 * ship_length / 9.81) ** 2 * (1 / ((we ** 2 * ship_length / 9.81) - 1) ** 2 + (2 * math.pi * ship_draft / ship_length) ** 2)
+wave_resistance_kn = wave_resistance_newtons / 10000
+
+# Plot the resistance curves
+plt.figure(figsize=(10, 6))
+plt.plot(speed_range, resistance_kn, label="Total Resistance")
+plt.plot(speed_range, [r + wave_resistance_kn for r in resistance_kn], label="Total Resistance + Wave Resistance")
+plt.scatter([apparent_speed], [apparent_resistance_kn], color='red', label='Apparent Speed')
+plt.xlabel("Ship Speed (m/s)")
+plt.ylabel("Resistance (kN)")
+plt.title("Resistance vs. Speed Curve")
+plt.grid()
+plt.legend()
+plt.show()
+
+# Calculate form factor (k) for ship and model
+print(f"The form factor (k) for the ship is: {k_ship:.4f}")
+print(f"The form factor (k) for the model is: {k_model:.4f}")
+
+# Calculate frictional resistance coefficient (Cf)
+print(f"The frictional resistance coefficient (Cf) for the ship is: {cf_ship:.4f}")
+print(f"The frictional resistance coefficient (Cf) for the model is: {cf_model:.4f}")
+
+# Calculate additional resistance components
+print(f"The roughness allowance is: {roughness_allowance:.4f}")
+print(f"The air resistance coefficient is: {air_resistance_coefficient:.4f}")
+
+# Calculate residuary resistance coefficient (CR)
+print(f"The residuary resistance coefficient (CR) is: {cr:.4f}")
+
+# Calculate wave encounter frequency
+print(f"The wave encounter frequency (we) is: {we:.4f} Hz")
+
+# Calculate wave resistance using Maruo's relation
+print(f"The wave resistance force is: {wave_resistance_kn:.2f} kN")
+
+# Calculate form factor (k) for ship and model
+print(f"The form factor (k) for the ship is: {k_ship:.4f}")
+print(f"The form factor (k) for the model is: {k_model:.4f}")
+
+# Calculate frictional resistance coefficient (Cf)
+print(f"The frictional resistance coefficient (Cf) for the ship is: {cf_ship:.4f}")
+print(f"The frictional resistance coefficient (Cf) for the model is: {cf_model:.4f}")
+
+# Calculate additional resistance components
+print(f"The roughness allowance is: {roughness_allowance:.4f}")
+print(f"The air resistance coefficient is: {air_resistance_coefficient:.4f}")
+
+# Calculate residuary resistance coefficient (CR)
+print(f"The residuary resistance coefficient (CR) is: {cr:.4f}")
+
+# Plot the total resistance curve
+plt.figure(figsize=(10, 6))
+plt.plot(speed_range, resistance_kn, label="Total Resistance")
+plt.plot(speed_range, [r + wave_resistance_kn for r in resistance_kn], label="Total Resistance + Wave Resistance")
+plt.scatter([apparent_speed], [apparent_resistance_kn], color='red', label='Apparent Speed')
+plt.xlabel("Ship Speed (m/s)")
+plt.ylabel("Resistance (kN)")
+plt.title("Resistance vs. Speed Curve")
+plt.grid()
+plt.legend()
+plt.show()
+
+# Print the results
+print(f"The total resistance of the ship at the apparent speed is: {apparent_resistance_kn:.2f} kN")
+print(f"The wave resistance of the ship is: {wave_resistance_kn:.2f} kN")
+print(f"The total resistance including wave resistance is: {apparent_resistance_kn + wave_resistance_kn:.2f} kN")
+
+# Calculate the power of the ship
+apparent_power_kw = (apparent_resistance_kn * apparent_speed) / efficiency
+total_power_kw = ((apparent_resistance_kn + wave_resistance_kn) * apparent_speed) / efficiency
+
+print(f"The power of the ship at the apparent speed is: {apparent_power_kw:.2f} kW")
+print(f"The total power of the ship including wave resistance is: {total_power_kw:.2f} kW")
+
+# Plot the power curves
+plt.figure(figsize=(10, 6))
+
+# Total Power curve (without wave resistance)
+power_kw = [(r * v / 1000) / efficiency for r, v in zip(resistance_kn, speed_range)]
+plt.plot(speed_range, power_kw, label="Total Power")
+
+# Total Power curve with wave resistance
+total_power_kw = [((r + wave_resistance_kn) * v / 1000) / efficiency for r, v in zip(resistance_kn, speed_range)]
+plt.plot(speed_range, total_power_kw, label="Total Power + Wave Power")
+
+plt.xlabel("Ship Speed (m/s)")
+plt.ylabel("Power (MW)")
+plt.title("Power vs. Speed Curve")
+plt.grid()
+plt.legend()
+plt.show()
+
+def calculate_fuel_consumption(ship_type, total_power_kw, speed_m_s, days):
+
+    if ship_type == 'container':
+        A = 0.15
+        B = 0.75
+        C = 2.3
+    elif ship_type == 'commercial':
+        A = 0.17
+        B = 0.71
+        C = 2.5
+    elif ship_type == 'ferry':
+        A = 0.20
+        B = 0.71
+        C = 2.5
+    else:
+        raise ValueError("Invalid ship type. Choose from 'container', 'commercial', or 'ferry'.")
+
+    fuel_consumption = A * total_power_kw ** B * speed_m_s ** C
+    fuel_consumption_tonnes_per_day = (fuel_consumption * 24 / 100) * fuel_density
+
+    return fuel_consumption_tonnes_per_day
+
+# Plot the fuel consumption curve
+plt.figure(figsize=(10, 6))
+fuel_consumption_per_speed = []
+for speed in speed_range:
+    fuel_consumption_tonnes_per_day = calculate_fuel_consumption(ship_type, total_power_kw[speed_range.index(speed)], speed, 1)
+    fuel_consumption_per_speed.append(fuel_consumption_tonnes_per_day)
+
+print(f"The Estimating Fuel Consumating of Ship including wave resistance is: {fuel_consumption_tonnes_per_day:.2f} tones/day")
+
+plt.plot(speed_range, fuel_consumption_per_speed, label="Fuel Consumption")
+plt.xlabel("Ship Speed (m/s)")
+plt.ylabel("Fuel Consumption (tonnes/day)")
+plt.title("Fuel Consumption vs. Speed Curve")
+plt.grid()
+plt.legend()
+plt.show()
